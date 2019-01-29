@@ -1,0 +1,387 @@
+apiVersion: v1
+kind: Template
+parameters:
+  - name: SOURCE_REPOSITORY_URL
+    description: The source URL for the application
+    displayName: Source URL
+    value: 'https://github.com/dummy_org/dummy_repo'
+    required: true
+  - name: GITHUB_WEBHOOK_SECRET
+    description: The secret used to configure a GitHub webhook
+    displayName: GitHub Webhook Secret
+    required: true
+    from: '[a-zA-Z0-9]{40}'
+    generate: expression
+objects:
+  - kind: Secret
+    apiVersion: v1
+    metadata:
+      name: demo-angular-thorntail-backend-database-bind
+      labels:
+        app: demo-angular-thorntail
+    stringData:
+      uri: demo-angular-thorntail-backend-database
+      database: my_data
+      user: dbuser
+      password: secret
+  - kind: ImageStreamTag
+    apiVersion: v1
+    metadata:
+      name: 'demo-angular-thorntail-backend-database:5.7'
+      creationTimestamp: null
+      labels:
+        app: demo-angular-thorntail
+    tag:
+      name: '5.7'
+      annotations: null
+      from:
+        kind: DockerImage
+        name: '172.30.1.1:5000/openshift/mysql:5.7'
+      generation: null
+      importPolicy: {}
+      referencePolicy:
+        type: ''
+    generation: 0
+    lookupPolicy:
+      local: false
+    image:
+      metadata:
+        creationTimestamp: null
+      dockerImageMetadata:
+        kind: DockerImage
+        apiVersion: '1.0'
+        Id: ''
+        Created: null
+        ContainerConfig: {}
+      dockerImageMetadataVersion: '1.0'
+      dockerImageLayers: null
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: demo-angular-thorntail-backend-database
+      creationTimestamp: null
+      labels:
+        app: demo-angular-thorntail
+    spec:
+      strategy:
+        resources: {}
+      triggers:
+        - type: ConfigChange
+        - type: ImageChange
+          imageChangeParams:
+            automatic: true
+            containerNames:
+              - demo-angular-thorntail-backend-database
+            from:
+              kind: ImageStreamTag
+              namespace: openshift
+              name: 'mysql:5.7'
+      replicas: 1
+      test: false
+      selector:
+        app: placeholder-app-label-d46881878f594a2dadfd963843452aab
+        deploymentconfig: demo-angular-thorntail-backend-database
+      template:
+        metadata:
+          creationTimestamp: null
+          labels:
+            app: placeholder-app-label-d46881878f594a2dadfd963843452aab
+            deploymentconfig: demo-angular-thorntail-backend-database
+        spec:
+          containers:
+            - name: demo-angular-thorntail-backend-database
+              image: '172.30.1.1:5000/openshift/mysql:5.7'
+              ports:
+                - containerPort: 3306
+                  protocol: TCP
+              resources:
+                limits:
+                  memory: 512Mi
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  value: verysecretrootpassword
+                - name: MYSQL_DATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: demo-angular-thorntail-backend-database-bind
+                      key: database
+                - name: MYSQL_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: demo-angular-thorntail-backend-database-bind
+                      key: user
+                - name: MYSQL_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: demo-angular-thorntail-backend-database-bind
+                      key: password
+              livenessProbe:
+                initialDelaySeconds: 30
+                tcpSocket:
+                  port: 3306
+              readinessProbe:
+                initialDelaySeconds: 5
+                exec:
+                  command:
+                    - /bin/sh
+                    - '-i'
+                    - '-c'
+                    - >-
+                      MYSQL_PWD="$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u
+                      $MYSQL_USER -D $MYSQL_DATABASE -e 'SELECT 1'
+    status:
+      latestVersion: 0
+      observedGeneration: 0
+      replicas: 0
+      updatedReplicas: 0
+      availableReplicas: 0
+      unavailableReplicas: 0
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: demo-angular-thorntail-backend-database
+      creationTimestamp: null
+      labels:
+        app: demo-angular-thorntail
+    spec:
+      ports:
+        - name: 3306-tcp
+          protocol: TCP
+          port: 3306
+          targetPort: 3306
+      selector:
+        app: placeholder-app-label-d46881878f594a2dadfd963843452aab
+        deploymentconfig: demo-angular-thorntail-backend-database
+    status:
+      loadBalancer: {}
+  - kind: ImageStream
+    apiVersion: v1
+    metadata:
+      name: openjdk18-openshift
+      creationTimestamp: null
+      labels:
+        app: demo-angular-thorntail
+    spec:
+      lookupPolicy:
+        local: false
+      tags:
+        - name: latest
+          from:
+            kind: DockerImage
+            name: registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift
+          generation: null
+          importPolicy: {}
+          referencePolicy:
+            type: ''
+    status:
+      dockerImageRepository: ''
+  - kind: ImageStream
+    apiVersion: v1
+    metadata:
+      name: demo-angular-thorntail-backend
+      creationTimestamp: null
+      labels:
+        app: demo-angular-thorntail
+    spec:
+      lookupPolicy:
+        local: false
+    status:
+      dockerImageRepository: ''
+  - kind: BuildConfig
+    apiVersion: v1
+    metadata:
+      name: demo-angular-thorntail-backend
+      creationTimestamp: null
+      labels:
+        app: demo-angular-thorntail
+    spec:
+      triggers:
+        - type: GitHub
+          github:
+            secret: '${GITHUB_WEBHOOK_SECRET}'
+        - type: ConfigChange
+        - type: ImageChange
+          imageChange: {}
+      source:
+        type: Git
+        git:
+          uri: '${SOURCE_REPOSITORY_URL}'
+        contextDir: backend
+      strategy:
+        type: Source
+        sourceStrategy:
+          from:
+            kind: ImageStreamTag
+            name: 'openjdk18-openshift:latest'
+          incremental: true
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: demo-angular-thorntail-backend-database-bind
+                  key: uri
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: demo-angular-thorntail-backend-database-bind
+                  key: user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: demo-angular-thorntail-backend-database-bind
+                  key: password
+            - name: JAVA_OPTIONS
+              value: >-
+                -Dswarm.datasources.data-sources.MyDS.connection-url=jdbc:mysql://$(DB_HOST)/my_data
+                                     -Dswarm.datasources.data-sources.MyDS.user-name=$(DB_USERNAME)
+                                     -Dswarm.datasources.data-sources.MyDS.password=$(DB_PASSWORD)
+                                     -Dswarm.datasources.data-sources.MyDS.driver-name=mysql
+            - name: GC_MAX_METASPACE_SIZE
+              value: '150'
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+      output:
+        to:
+          kind: ImageStreamTag
+          name: 'demo-angular-thorntail-backend:latest'
+      resources: {}
+      postCommit: {}
+      nodeSelector: null
+    status:
+      lastVersion: 0
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: demo-angular-thorntail-backend
+      creationTimestamp: null
+      labels:
+        app: demo-angular-thorntail
+    spec:
+      strategy:
+        resources: {}
+      triggers:
+        - type: ConfigChange
+        - type: ImageChange
+          imageChangeParams:
+            automatic: true
+            containerNames:
+              - demo-angular-thorntail-backend
+            from:
+              kind: ImageStreamTag
+              name: 'demo-angular-thorntail-backend:latest'
+      replicas: 1
+      test: false
+      selector:
+        app: placeholder-app-label-d46881878f594a2dadfd963843452aab
+        deploymentconfig: demo-angular-thorntail-backend
+      template:
+        metadata:
+          creationTimestamp: null
+          labels:
+            app: placeholder-app-label-d46881878f594a2dadfd963843452aab
+            deploymentconfig: demo-angular-thorntail-backend
+        spec:
+          containers:
+            - name: demo-angular-thorntail-backend
+              image: 'demo-angular-thorntail-backend:latest'
+              ports:
+                - containerPort: 8080
+                  protocol: TCP
+                - containerPort: 8443
+                  protocol: TCP
+                - containerPort: 8778
+                  protocol: TCP
+              resources:
+                limits:
+                  memory: 2G
+              env:
+                - name: DB_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: demo-angular-thorntail-backend-database-bind
+                      key: uri
+                - name: DB_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: demo-angular-thorntail-backend-database-bind
+                      key: user
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: demo-angular-thorntail-backend-database-bind
+                      key: password
+                - name: JAVA_OPTIONS
+                  value: >-
+                    -Dswarm.datasources.data-sources.MyDS.connection-url=jdbc:mysql://$(DB_HOST)/my_data
+                                         -Dswarm.datasources.data-sources.MyDS.user-name=$(DB_USERNAME)
+                                         -Dswarm.datasources.data-sources.MyDS.password=$(DB_PASSWORD)
+                                         -Dswarm.datasources.data-sources.MyDS.driver-name=mysql
+                - name: GC_MAX_METASPACE_SIZE
+                  value: '150'
+                - name: KUBERNETES_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+              readinessProbe:
+                httpGet:
+                  path: /health
+                  port: 8080
+                  scheme: HTTP
+                initialDelaySeconds: 5
+                timeoutSeconds: 3
+                periodSeconds: 10
+                failureThreshold: 10
+              livenessProbe:
+                httpGet:
+                  path: /health
+                  port: 8080
+                  scheme: HTTP
+                initialDelaySeconds: 5
+                timeoutSeconds: 3
+    status:
+      latestVersion: 0
+      observedGeneration: 0
+      replicas: 0
+      updatedReplicas: 0
+      availableReplicas: 0
+      unavailableReplicas: 0
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: demo-angular-thorntail-backend
+      creationTimestamp: null
+      labels:
+        app: demo-angular-thorntail
+    spec:
+      ports:
+        - name: 8080-tcp
+          protocol: TCP
+          port: 8080
+          targetPort: 8080
+        - name: 8443-tcp
+          protocol: TCP
+          port: 8443
+          targetPort: 8443
+        - name: 8778-tcp
+          protocol: TCP
+          port: 8778
+          targetPort: 8778
+      selector:
+        app: placeholder-app-label-d46881878f594a2dadfd963843452aab
+        deploymentconfig: demo-angular-thorntail-backend
+    status:
+      loadBalancer: {}
+  - apiVersion: v1
+    kind: Route
+    metadata:
+      name: demo-angular-thorntail-backend
+      labels:
+        app: demo-angular-thorntail
+    spec:
+      port:
+        targetPort: 8080-tcp
+      to:
+        kind: Service
+        name: demo-angular-thorntail-backend
